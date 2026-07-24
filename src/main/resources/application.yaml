@@ -1,3 +1,10 @@
 spring:
   application:
     name: redis-lab
+
+  data:
+    redis:
+      host: localhost
+      port: 26379
+      connect-timeout: 2s
+      timeout: 2s
