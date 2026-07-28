@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
 import java.util.Optional;
 
 @Service
@@ -18,6 +19,10 @@ public class RedisStringService {
 
     public Optional<String> findbyname(String name) {
         return Optional.ofNullable(stringRedisTemplate.opsForValue().get(createStringKey(name)));
+    }
+
+    public void saveWithExpiration(String name, String value, Duration expiration) {
+        stringRedisTemplate.opsForValue().set(createStringKey(name), value, expiration);
     }
 
     private String createStringKey(String name) {
