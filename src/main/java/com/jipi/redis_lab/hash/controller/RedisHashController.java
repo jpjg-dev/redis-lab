@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.*;
 public class RedisHashController {
     private final RedisHashService redisHashService;
 
+    // 8강: 여러 Field-Value를 하나의 Hash에 일괄 저장하고 204로 응답한다.
     @PutMapping
     public ResponseEntity<Void> saveAll(
             @PathVariable("name") String name,
@@ -26,6 +27,7 @@ public class RedisHashController {
         return ResponseEntity.noContent().build();
     }
 
+    // 8강: 특정 Field를 저장하거나 기존 값을 수정하고 204로 응답한다.
     @PutMapping("/fields/{field}")
     public ResponseEntity<Void> saveField(
             @PathVariable("name") String name,
@@ -37,6 +39,7 @@ public class RedisHashController {
         return ResponseEntity.noContent().build();
     }
 
+    // 8강: Hash의 전체 Field를 조회하고 비어 있으면 404로 응답한다.
     @GetMapping
     public ResponseEntity<HashEntriesResponse> findAll(
             @PathVariable("name") String name
@@ -47,6 +50,7 @@ public class RedisHashController {
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
+    // 8강: 특정 Field를 조회하고 존재하지 않으면 404로 응답한다.
     @GetMapping("/fields/{field}")
     public ResponseEntity<HashFieldValueResponse> findField(
             @PathVariable("name") String name,
@@ -59,6 +63,7 @@ public class RedisHashController {
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
+    // 8강: 특정 Field를 삭제하고 대상이 없으면 404, 삭제되면 204로 응답한다.
     @DeleteMapping("/fields/{field}")
     public ResponseEntity<Void> deleteField(
             @PathVariable("name") String name,
