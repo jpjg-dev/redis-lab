@@ -5,6 +5,7 @@ import com.jipi.redis_lab.modeling.model.RankedProduct;
 import com.jipi.redis_lab.modeling.support.ProductRedisKey;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataAccessException;
 import org.springframework.data.redis.core.*;
 import org.springframework.stereotype.Service;
 
@@ -17,6 +18,9 @@ import java.util.*;
 public class ProductRedisService {
     private static final String NAME_FIELD = "name";
     private static final String PRICE_FIELD = "price";
+
+    // 14강: WATCH 충돌 발생 시 무한 반복하지 않도록 재시도 횟수를 제한한다.
+    private static final int MAX_TRANSCATIONS_RETRIES = 3;
 
     private final StringRedisTemplate stringRedisTemplate;
 
@@ -35,6 +39,7 @@ public class ProductRedisService {
     }
 
     // 12강: 단순 숫자 카운터인 조회수는 String의 INCR을 사용한다.
+    // 13강: 조회 후 값을 다시 저장하지 않고 INCR 한 명령으로 원자적으로 증가시킨다.
     public long increaseViewCount(long productId) {
         String key = ProductRedisKey.viewCount(productId);
         Long viewCount = valueOperations().increment(key);
@@ -49,33 +54,40 @@ public class ProductRedisService {
     }
 
     // 12강: 좋아요 사용자는 중복을 허용하지 않으므로 Set에 저장한다.
-    // 새 좋아요일 때만 Sorted Set의 랭킹 점수를 증가시킨다.
+    // 13강: SADD와 ZINCRBY는 각각 원자적이지만,
+    // 두 명령을 조합한 좋아요 처리 전체는 하나의 원자적 작업이 아니다.
+    // 여러 Redis 명령의 원자적 처리는 14~15강에서 다룬다.
+    // 14강: WATCH + MULTI + EXEC를 사용해 좋아요 정보와 랭킹 점수를 함께 변경한다.
     public boolean addLike(long productId, String userId) {
         String likedUsersKey = ProductRedisKey.likeUsers(productId);
-        Long addedCount = setOperations().add(likedUsersKey, userId);
-        boolean added = addedCount != null && addedCount > 0;
-
-        if (!added) {
-            log.info(
-                    "Redis product like already exists. key={}, productId={}, userId={}",
-                    likedUsersKey,
+        String rankingKey = ProductRedisKey.likeRanking();
+        for (int attempt = 1; attempt <= MAX_TRANSCATIONS_RETRIES; attempt++) {
+            Boolean added = executeLikeTransaction(
                     productId,
-                    userId
+                    userId,
+                    likedUsersKey,
+                    rankingKey);
+
+            if (!added) {
+                return added;
+            }
+
+            log.info(
+                    "Redis product like transaction retry. productId={}, userId={}, attempt={}",
+                    productId,
+                    userId,
+                    attempt
             );
-            return false;
         }
 
-        Double likeScore = zSetOperations()
-                .incrementScore(ProductRedisKey.likeRanking(), String.valueOf(productId), 1);
-
         log.info(
-                "Redis product like added. productId={}, userId={}, likeScore={}",
+                "Redis product like transaction failed. productId={}, userId={}",
                 productId,
-                userId,
-                likeScore
+                userId
         );
 
-        return true;
+        return false;
+
     }
 
     // 12강: Hash, String, Set에 나뉜 데이터를 하나의 상품 정보로 조립한다.
@@ -149,5 +161,85 @@ public class ProductRedisService {
     private ZSetOperations<String, String>
     zSetOperations() {
         return stringRedisTemplate.opsForZSet();
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private Boolean executeLikeTransaction(
+            long productId,
+            String userId,
+            String likedUsersKey,
+            String rankingKey
+    ) {
+        return stringRedisTemplate.execute(
+                new SessionCallback<Boolean>() {
+
+                    @Override
+                    public Boolean execute(
+                            RedisOperations operations
+                    ) throws DataAccessException {
+
+                        operations.watch(likedUsersKey);
+
+                        Boolean alreadyLiked =
+                                operations
+                                        .opsForSet()
+                                        .isMember(
+                                                likedUsersKey,
+                                                userId
+                                        );
+
+                        if (Boolean.TRUE.equals(alreadyLiked)) {
+                            operations.unwatch();
+
+                            log.info(
+                                    "Redis product like already exists. key={}, productId={}, userId={}",
+                                    likedUsersKey,
+                                    productId,
+                                    userId
+                            );
+
+                            return false;
+                        }
+
+                        try {
+                            operations.multi();
+
+                            operations
+                                    .opsForSet()
+                                    .add(
+                                            likedUsersKey,
+                                            userId
+                                    );
+
+                            operations
+                                    .opsForZSet()
+                                    .incrementScore(
+                                            rankingKey,
+                                            String.valueOf(productId),
+                                            1
+                                    );
+
+                            List<Object> results =
+                                    operations.exec();
+
+                            if (results == null) {
+                                return null;
+                            }
+
+                            log.info(
+                                    "Redis product like transaction committed. productId={}, userId={}",
+                                    productId,
+                                    userId
+                            );
+
+                            return true;
+
+                        } catch (RuntimeException exception) {
+                            operations.discard();
+                            throw exception;
+                        }
+                    }
+                }
+        );
     }
 }
