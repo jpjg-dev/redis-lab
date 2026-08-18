@@ -35,6 +35,7 @@ public class ProductRedisService {
     }
 
     // 12강: 단순 숫자 카운터인 조회수는 String의 INCR을 사용한다.
+    // 13강: 조회 후 값을 다시 저장하지 않고 INCR 한 명령으로 원자적으로 증가시킨다.
     public long increaseViewCount(long productId) {
         String key = ProductRedisKey.viewCount(productId);
         Long viewCount = valueOperations().increment(key);
@@ -49,7 +50,9 @@ public class ProductRedisService {
     }
 
     // 12강: 좋아요 사용자는 중복을 허용하지 않으므로 Set에 저장한다.
-    // 새 좋아요일 때만 Sorted Set의 랭킹 점수를 증가시킨다.
+    // 13강: SADD와 ZINCRBY는 각각 원자적이지만,
+    // 두 명령을 조합한 좋아요 처리 전체는 하나의 원자적 작업이 아니다.
+    // 여러 Redis 명령의 원자적 처리는 14~15강에서 다룬다.
     public boolean addLike(long productId, String userId) {
         String likedUsersKey = ProductRedisKey.likeUsers(productId);
         Long addedCount = setOperations().add(likedUsersKey, userId);
